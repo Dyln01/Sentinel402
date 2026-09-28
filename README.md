@@ -11,12 +11,12 @@ USDC on Base.
 >
 > **This repository is the guide.** The code lives in
 > **[Dyln01/pii-guard](https://github.com/Dyln01/pii-guard)** (a single
-> Cloudflare Worker, zero runtime dependencies). Full protocol docs:
+> zero-dependency server). Full protocol docs:
 > [`docs/MPP.md`](https://github.com/Dyln01/pii-guard/blob/main/docs/MPP.md) ·
 > [`docs/DISCOVERY.md`](https://github.com/Dyln01/pii-guard/blob/main/docs/DISCOVERY.md) ·
 > [`docs/RESEARCH.md`](https://github.com/Dyln01/pii-guard/blob/main/docs/RESEARCH.md)
 
-**Live service:** `https://pii-guardrail.sentinel402.workers.dev`
+**Live service:** `https://pii-guardrail.chronokey.workers.dev`
 
 ---
 
@@ -47,7 +47,7 @@ challenges at once**. Pick whichever your stack speaks — the price, the USDC
 contract and the receiving wallet are identical.
 
 ```bash
-H=https://pii-guardrail.sentinel402.workers.dev
+H=https://pii-guardrail.chronokey.workers.dev
 curl -si -X POST $H/v1/scan -H 'content-type: application/json' -d '{"text":"..."}'
 # HTTP/2 402
 # PAYMENT-REQUIRED: eyJ4NDAyVmVyc2lv…      <- x402 v2 (base64 JSON)
@@ -268,24 +268,24 @@ attack-class table: the code repo's README and
 
 ## Running your own instance
 
-The Worker is MIT-licensed and deploys three ways — paste one file into the
-Cloudflare dashboard, `wrangler deploy`, or Git integration (auto-deploy on
-push). `wrangler.jsonc` ships pre-configured for **Base mainnet** through
-keyless facilitators; the one required edit is `PAY_TO` (your wallet — both
-rails pay into it). Testnet dry-run: `NETWORK=base-sepolia` + the x402.org
-facilitator + faucet USDC. `/health` returns **503 with the exact reason** if
-anything is misconfigured (testnet facilitator on mainnet, price below a
-facilitator floor, zero-address wallet…) — it will never silently serve a
-paywall that cannot settle.
+The service is MIT-licensed and fully self-hostable as a single
+zero-dependency server bundle; the code repository contains step-by-step
+deployment guides (including a no-tooling paste path and auto-deploy on push).
+It ships pre-configured for **Base mainnet**; the one required edit is your
+receiving wallet (`PAY_TO`) — both payment rails pay into it. A free testnet
+dry-run mode is documented too. `/health` returns **503 with the exact
+reason** if anything is misconfigured (testnet facilitator on mainnet, price
+below a facilitator floor, zero-address wallet, bad credentials…) — it will
+never silently serve a paywall that cannot settle.
 
 ```bash
 git clone https://github.com/Dyln01/pii-guard && cd pii-guard
 npm install
-npm test                 # 275 unit tests (protocol spec vectors included)
-npm run test:integration # 215 end-to-end checks against real workerd
+npm test                 # 279 unit tests (protocol spec vectors included)
+npm run test:integration # 219 end-to-end checks against the real runtime
 npm run probe            # live facilitator/price viability for YOUR config
-npx wrangler deploy
-npm run verify:live -- https://<your-worker>.workers.dev
+# then follow docs/DEPLOY.md and verify:
+npm run verify:live -- https://<your-instance-url>
 ```
 
 Guides: [`docs/DEPLOY.md`](https://github.com/Dyln01/pii-guard/blob/main/docs/DEPLOY.md) ·
@@ -306,7 +306,7 @@ own threshold. MPP support covers the `evm`/`charge` method with EIP-3009
 `authorization` credentials (the USDC path); `permit2`/`transaction`/`hash`
 credential types and non-EVM methods (`tempo`, `stripe`, `solana`, …) are
 answered with an actionable `invalid-payload` problem — those rails need a
-server-side broadcaster or PSP, which this deliberately keyless Worker is not.
+server-side broadcaster or PSP, which this deliberately keyless service is not.
 
 ---
 
