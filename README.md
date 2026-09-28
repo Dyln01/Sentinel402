@@ -6,6 +6,9 @@ gets an HTTP 402 telling it the exact price, signs a payment with any EVM
 wallet, retries, and gets the answer. Every call costs fractions of a cent in
 USDC on Base.
 
+> **Contact / merchant verification:** `wwdfc388@gmail.com` (also published in
+> the service's `/openapi.json` for x402scan origin verification).
+>
 > **This repository is the guide.** The code lives in
 > **[Dyln01/pii-guard](https://github.com/Dyln01/pii-guard)** (a single
 > Cloudflare Worker, zero runtime dependencies). Full protocol docs:
@@ -21,10 +24,12 @@ USDC on Base.
 
 | Surface | What it does | Price |
 |---|---|---|
-| **PII & secret guardrail** — `POST /v1/scan` | Scan an outbound payload for card numbers, SSNs, emails, phones, IP/MAC, IBANs, routing numbers, crypto wallets, passports, national IDs, DOBs, medical record numbers — and secrets: AWS/GitHub/OpenAI/Stripe/Slack/Google/Twilio keys, JWTs, bearer tokens, PEM private keys, basic-auth URLs, connection strings, password assignments. Returns a verdict (`allow`/`redact`/`block`), a 0–100 risk score, per-rule findings with **redacted** samples, and in `redact` mode a sanitized copy that is structurally identical and safe to forward. | **$0.01** |
-| **Live data** — `GET /v1/data/{collection}` | Crypto spot prices (24h change), current weather + today's high/low for any place, the 5 latest commits of a public GitHub repo, live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS), ECB daily FX rates. Normalized, citable, cached 30 s–1 h. | **$0.002** |
-| **RCP/1 retrieval** — `POST /rcp/retrieve` | The same live data as spec-shaped retrieval `Hit`s with `citation{uri,title}` — drop straight into a RAG context with provenance attached. Handshake methods free. | **$0.002** |
-| **MCP tools** — `POST /mcp` | `scan_for_pii` and `get_live_data` as MCP tools over streamable HTTP. `initialize` / `tools/list` / `ping` / `service_info` are free. | **$0.01 / $0.002** |
+| **PII & secret guardrail** — `POST /v1/scan` | Scan an outbound payload for card numbers, SSNs, emails, phones, IP/MAC, IBANs, routing numbers, crypto wallets, passports, national IDs, DOBs, medical record numbers — and secrets: AWS/GitHub/OpenAI/Stripe/Slack/Google/Twilio keys, JWTs, bearer tokens, PEM private keys, basic-auth URLs, connection strings, password assignments. Returns a verdict (`allow`/`redact`/`block`), a 0–100 risk score, per-rule findings with **redacted** samples, and in `redact` mode a sanitized copy that is structurally identical and safe to forward. | **$0.02** |
+| **Batch guardrail** — `POST /v1/scan/batch` | Up to **20 payloads in one paid call** (32,000 chars combined): per-item verdicts, risks, findings and sanitized copies, plus an aggregate worst-case decision. One settlement for the whole batch — the cheap way to scan a dataset, thread or folder. | **$0.05** |
+| **Compliance audit** — `POST /v1/audit` | A pass/fail report per framework profile — **PCI DSS 4.x** (card data), **GDPR** (personal data), **HIPAA Safe Harbor** (health identifiers), **secrets hygiene** (SOC 2 CC6-style). Every verdict names the exact triggering rules; includes a sanitized copy and an honest scope disclaimer (rule-mapping, not legal advice). | **$0.03** |
+| **Live data** — `GET /v1/data/{collection}` | Crypto spot prices (24h change), current weather + today's high/low for any place, the 5 latest commits of a public GitHub repo, live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS), ECB daily FX rates, **Hacker News** front page (or one story by id) and **Wikipedia** page summaries. Normalized, citable, cached 30 s–1 h. | **$0.003** |
+| **RCP/1 retrieval** — `POST /rcp/retrieve` | The same live data as spec-shaped retrieval `Hit`s with `citation{uri,title}` — drop straight into a RAG context with provenance attached. Routes natural language ("btc price", "hacker news top stories", "what is X"). Handshake methods free. | **$0.003** |
+| **MCP tools** — `POST /mcp` | `scan_for_pii` ($0.02), `scan_batch` ($0.05), `audit_compliance` ($0.03) and `get_live_data` ($0.003) as MCP tools over streamable HTTP. `initialize` / `tools/list` / `ping` / `service_info` are free. | **per tool** |
 | **Free trial** — `POST /v1/trial` | The same scan engine, 1,000 chars, 10/day/IP. Try before you pay. | **$0** |
 
 Detection is regex + checksums (Luhn, IBAN mod-97, ABA 3-7-1, SSA issuance
@@ -145,8 +150,23 @@ async function safeSend(url, body) {
 }
 ```
 
-At $0.01 and ~300 ms, that is cheaper and faster than the mistake it
-prevents. The code repo also ships
+At $0.02 and ~300 ms, that is cheaper and faster than the mistake it
+prevents. Scanning many items? `POST /v1/scan/batch` does up to 20 in one
+payment ($0.05 — 87% off per document vs single scans, one settlement instead
+of twenty). Need a compliance answer rather than a scan? `POST /v1/audit`
+returns per-framework pass/fail verdicts naming the exact triggering rules:
+
+```bash
+curl -s -X POST $H/v1/audit -H 'content-type: application/json' \
+  -d '{"text":"Patient SSN 123-45-6789 paid with card 4242 4242 4242 4242"}'
+# -> {"overall":"fail",
+#     "frameworks":[{"id":"pci-dss","verdict":"fail","triggered":[{"rule":"CREDIT_CARD", ...}]},
+#                   {"id":"gdpr","verdict":"fail","triggered":[{"rule":"SSN_KEYWORD", ...}]}, ...],
+#     "sanitized":"Patient [SSN_KEYWORD:#f1a2b3] paid with card [CREDIT_CARD:************4242]",
+#     "disclaimer":"Rule-mapping ... not legal advice ..."}
+```
+
+The code repo also ships
 [`@sentinel402/agent-guardrail`](https://github.com/Dyln01/pii-guard/tree/main/packages/agent-guardrail) —
 a zero-dependency `fetch` wrapper that scans, pays, redacts (or refuses)
 transparently, with an injectable signer.
@@ -192,7 +212,18 @@ curl -s -X POST $H/v1/trial -H 'content-type: application/json' \
 Convenience headers on the 200: `X-Scan-Decision`, `X-Scan-Risk`,
 `X-Settlement-Tx`. `GET /v1/data/{collection}` takes per-collection args
 (`symbol=BTC`, `place=Berlin`, `repo=owner/name`, `league=NBA`,
-`base=USD&quotes=EUR,GBP`) and returns citable `items[]` plus a joined `text`.
+`base=USD&quotes=EUR,GBP`, `limit=10` or `story=<id>` for hn, `page=<title>`
+and `lang=` for wiki) and returns citable `items[]` plus a joined `text`.
+
+`POST /v1/scan/batch` takes `{ items: [{text} | {payload}, ... up to 20], mode?, minSeverity?, blockThreshold? }`
+and returns `{ results: [per-item verdicts, in order], aggregate: {decision, risk, counts}, batch: {items, flagged, totalChars}, x402 }`
+with headers `X-Scan-Decision`, `X-Batch-Flagged`, `X-Settlement-Tx`.
+Over-budget batches (21+ items, >32k combined chars) are rejected **before**
+settlement — a doomed call is never charged, on any route.
+
+`POST /v1/audit` takes `{ text | payload, frameworks?: ["pci-dss","gdpr","hipaa","secrets"] }`
+and returns `{ overall: "pass"|"fail", summary, risk, frameworks: [{id, name, verdict, triggered: [{rule, severity, count}], findingsCount}], otherFindings, sanitized, disclaimer, x402 }`
+with headers `X-Audit-Verdict`, `X-Audit-Frameworks-Failed`.
 
 ---
 
@@ -250,8 +281,8 @@ paywall that cannot settle.
 ```bash
 git clone https://github.com/Dyln01/pii-guard && cd pii-guard
 npm install
-npm test                 # 264 unit tests (protocol spec vectors included)
-npm run test:integration # 179 end-to-end checks against real workerd
+npm test                 # 275 unit tests (protocol spec vectors included)
+npm run test:integration # 215 end-to-end checks against real workerd
 npm run probe            # live facilitator/price viability for YOUR config
 npx wrangler deploy
 npm run verify:live -- https://<your-worker>.workers.dev
@@ -265,7 +296,9 @@ Guides: [`docs/DEPLOY.md`](https://github.com/Dyln01/pii-guard/blob/main/docs/DE
 
 ## Honest limitations
 
-Regex + checksums cannot find **names, free-text addresses, or undated
+Audits are rule-mapping, not legal advice: a `pass` verdict means "none of
+this framework's mapped data classes were detected" — it cannot certify
+compliance. Regex + checksums cannot find **names, free-text addresses, or undated
 birthdays** — that needs a NER model. The correct framing: *catches the
 credentials and identifiers that cause reportable breaches, in ~1 ms, for a
 fraction of a cent*. Every finding carries a `confidence` so you can set your
