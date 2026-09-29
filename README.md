@@ -27,14 +27,16 @@ USDC on Base.
 | **PII & secret guardrail** — `POST /v1/scan` | Scan an outbound payload for card numbers, SSNs, emails, phones, IP/MAC, IBANs, routing numbers, crypto wallets, passports, national IDs, DOBs, medical record numbers — and secrets: AWS/GitHub/OpenAI/Stripe/Slack/Google/Twilio keys, JWTs, bearer tokens, PEM private keys, basic-auth URLs, connection strings, password assignments. Returns a verdict (`allow`/`redact`/`block`), a 0–100 risk score, per-rule findings with **redacted** samples, and in `redact` mode a sanitized copy that is structurally identical and safe to forward. | **$0.02** |
 | **Batch guardrail** — `POST /v1/scan/batch` | Up to **20 payloads in one paid call** (32,000 chars combined): per-item verdicts, risks, findings and sanitized copies, plus an aggregate worst-case decision. One settlement for the whole batch — the cheap way to scan a dataset, thread or folder. | **$0.05** |
 | **Compliance audit** — `POST /v1/audit` | A pass/fail report per framework profile — **PCI DSS 4.x** (card data), **GDPR** (personal data), **HIPAA Safe Harbor** (health identifiers), **secrets hygiene** (SOC 2 CC6-style). Every verdict names the exact triggering rules; includes a sanitized copy and an honest scope disclaimer (rule-mapping, not legal advice). | **$0.03** |
-| **Live data** — `GET /v1/data/{collection}` | Crypto spot prices (24h change), current weather + today's high/low for any place, the 5 latest commits of a public GitHub repo, live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS), ECB daily FX rates, **Hacker News** front page (or one story by id) and **Wikipedia** page summaries. Normalized, citable, cached 30 s–1 h. | **$0.003** |
+| **Prompt-injection guard** — `POST /v1/scan/prompt` | Scan **untrusted text** (web pages, tool outputs, emails, user messages) before it enters your agent's context window. Catches instruction overrides ("ignore previous instructions"), system-prompt exfiltration, **invisible Unicode tag payloads**, zero-width steganography, fake role delimiters (`system:`/`[INST]`/`<\|im_start\|>`), jailbreak language, credential/fund-exfil instructions, HTML-comment directives, markdown image beacons and obfuscated blobs. Verdict `allow`/`review`/`block` + 0–100 risk + matched excerpts. 13 patterns, catalogue at `GET /prompt-rules`. | **$0.01** |
+| **Live data** — `GET /v1/data/{collection}` | **14 collections**: crypto spot prices (24h change) · **stock/ETF/index quotes** (AAPL, ^GSPC, BTC-USD) · **news headlines or topic search** · current weather + today's high/low · the 5 latest commits of a public GitHub repo · live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS) · ECB daily FX rates · Hacker News front page (or one story by id) · **HN search** · Wikipedia summaries · **IP geolocation + ISP/ASN** (`ip=me` supported) · **npm** and **PyPI** package metadata · **ENS** forward/reverse resolution. Normalized, citable, cached 30 s–24 h. | **$0.003** |
 | **RCP/1 retrieval** — `POST /rcp/retrieve` | The same live data as spec-shaped retrieval `Hit`s with `citation{uri,title}` — drop straight into a RAG context with provenance attached. Routes natural language ("btc price", "hacker news top stories", "what is X"). Handshake methods free. | **$0.003** |
-| **MCP tools** — `POST /mcp` | `scan_for_pii` ($0.02), `scan_batch` ($0.05), `audit_compliance` ($0.03) and `get_live_data` ($0.003) as MCP tools over streamable HTTP. `initialize` / `tools/list` / `ping` / `service_info` are free. | **per tool** |
+| **MCP tools** — `POST /mcp` | `scan_for_pii` ($0.02), `scan_batch` ($0.05), `audit_compliance` ($0.03), `scan_prompt_injection` ($0.01) and `get_live_data` ($0.003) as MCP tools over streamable HTTP. `initialize` / `tools/list` / `ping` / `service_info` are free. | **per tool** |
 | **Free trial** — `POST /v1/trial` | The same scan engine, 1,000 chars, 10/day/IP. Try before you pay. | **$0** |
 
 Detection is regex + checksums (Luhn, IBAN mod-97, ABA 3-7-1, SSA issuance
-ranges) — no model in the loop, so it cannot hallucinate a finding. 38 rules,
-34 on by default; the live catalogue is at `GET /rules`. **Zero retention:**
+ranges) — no model in the loop, so it cannot hallucinate a finding. 50 rules,
+46 on by default; the live catalogues are at `GET /rules` (PII/secrets) and
+`GET /prompt-rules` (injection patterns). **Zero retention:**
 payloads are scanned in memory and discarded; detected secrets are never
 echoed back in plaintext.
 
@@ -165,6 +167,12 @@ curl -s -X POST $H/v1/audit -H 'content-type: application/json' \
 #     "sanitized":"Patient [SSN_KEYWORD:#f1a2b3] paid with card [CREDIT_CARD:************4242]",
 #     "disclaimer":"Rule-mapping ... not legal advice ..."}
 ```
+
+And before **untrusted text** (a web page, a tool result, a user message) goes
+into your context window, `POST /v1/scan/prompt` ($0.01) checks it for
+injection markers — instruction overrides, system-prompt leaks, invisible
+Unicode payloads, fake role delimiters, exfil instructions — and answers
+`allow` / `review` / `block` with a risk score and the matched excerpts.
 
 The code repo also ships
 [`@sentinel402/agent-guardrail`](https://github.com/Dyln01/pii-guard/tree/main/packages/agent-guardrail) —
