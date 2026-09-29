@@ -18,6 +18,8 @@ USDC on Base.
 
 **Live service:** `https://pii-guardrail.chronokey.workers.dev`
 
+[![pii-guardrail.chronokey.workers.dev on the Neuronto ARD Registry](https://neuronto.com/badge/pii-guardrail.chronokey.workers.dev.svg)](https://neuronto.com/ard-publishers/pii-guardrail.chronokey.workers.dev)
+
 ---
 
 ## What you can buy
