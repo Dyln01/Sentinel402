@@ -30,7 +30,9 @@ USDC on Base.
 | **Batch guardrail** — `POST /v1/scan/batch` | Up to **20 payloads in one paid call** (32,000 chars combined): per-item verdicts, risks, findings and sanitized copies, plus an aggregate worst-case decision. One settlement for the whole batch — the cheap way to scan a dataset, thread or folder. | **$0.05** |
 | **Compliance audit** — `POST /v1/audit` | A pass/fail report per framework profile — **PCI DSS 4.x** (card data), **GDPR** (personal data), **HIPAA Safe Harbor** (health identifiers), **secrets hygiene** (SOC 2 CC6-style). Every verdict names the exact triggering rules; includes a sanitized copy and an honest scope disclaimer (rule-mapping, not legal advice). | **$0.03** |
 | **Prompt-injection guard** — `POST /v1/scan/prompt` | Scan **untrusted text** (web pages, tool outputs, emails, user messages) before it enters your agent's context window. Catches instruction overrides ("ignore previous instructions"), system-prompt exfiltration, **invisible Unicode tag payloads**, zero-width steganography, fake role delimiters (`system:`/`[INST]`/`<\|im_start\|>`), jailbreak language, credential/fund-exfil instructions, HTML-comment directives, markdown image beacons and obfuscated blobs. Verdict `allow`/`review`/`block` + 0–100 risk + matched excerpts. 13 patterns, catalogue at `GET /prompt-rules`. | **$0.01** |
-| **Live data** — `GET /v1/data/{collection}` | **14 collections**: crypto spot prices (24h change) · **stock/ETF/index quotes** (AAPL, ^GSPC, BTC-USD) · **news headlines or topic search** · current weather + today's high/low · the 5 latest commits of a public GitHub repo · live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS) · ECB daily FX rates · Hacker News front page (or one story by id) · **HN search** · Wikipedia summaries · **IP geolocation + ISP/ASN** (`ip=me` supported) · **npm** and **PyPI** package metadata · **ENS** forward/reverse resolution. Normalized, citable, cached 30 s–24 h. | **$0.003** |
+| **Batch injection guard** — `POST /v1/scan/prompt/batch` | Up to **20 untrusted texts in one paid call** (32,000 chars combined): per-item `allow`/`review`/`block` verdicts plus the worst-case aggregate. The cheap way to vet a whole crawled page set, message thread or folder of tool outputs in a single settlement. | **$0.03** |
+| **Live data** — `GET /v1/data/{collection}` | **15 collections**: crypto spot prices (24h change) · **stock/ETF/index quotes** (AAPL, ^GSPC, BTC-USD) · **news headlines or topic search** · current weather + today's high/low · the 5 latest commits of a public GitHub repo · live/final sports scores (NBA · NFL · MLB · NHL · EPL · UCL · LaLiga · Serie A · Bundesliga · MLS) · ECB daily FX rates · Hacker News front page (or one story by id) · **HN search** · Wikipedia summaries · **IP geolocation + ISP/ASN** (`ip=me` supported) · **npm** and **PyPI** package metadata · **ENS** forward/reverse resolution · **arXiv papers by query or id** (natural RAG fuel, keyless). Normalized, citable, cached 30 s–24 h. | **$0.003** |
+| **Credit bundles** — `POST /v1/credits/buy` | Pay **$5 once** (x402 or MPP) and receive **5,000 prepaid units** (1 unit = $0.001) behind a bearer token. Send the token in `X-Credit-Token` on ANY paid route and its unit cost is deducted atomically — no per-call signing, no settlement round-trip. Balance checks are free; packs expire after 90 days. | **$5 / pack** |
 | **RCP/1 retrieval** — `POST /rcp/retrieve` | The same live data as spec-shaped retrieval `Hit`s with `citation{uri,title}` — drop straight into a RAG context with provenance attached. Routes natural language ("btc price", "hacker news top stories", "what is X"). Handshake methods free. | **$0.003** |
 | **MCP tools** — `POST /mcp` | `scan_for_pii` ($0.02), `scan_batch` ($0.05), `audit_compliance` ($0.03), `scan_prompt_injection` ($0.01) and `get_live_data` ($0.003) as MCP tools over streamable HTTP. `initialize` / `tools/list` / `ping` / `service_info` are free. | **per tool** |
 | **Free trial** — `POST /v1/trial` | The same scan engine, 1,000 chars, 10/day/IP. Try before you pay. | **$0** |
@@ -44,11 +46,12 @@ echoed back in plaintext.
 
 ---
 
-## How to pay (both rails, one wallet)
+## How to pay (three rails, one wallet)
 
 Every paid endpoint answers an unpaid request with **HTTP 402 carrying both
-challenges at once**. Pick whichever your stack speaks — the price, the USDC
-contract and the receiving wallet are identical.
+on-chain challenges at once**. Pick whichever your stack speaks — the price,
+the USDC contract and the receiving wallet are identical. Or skip per-call
+signing entirely with **prepaid credits** (rail 3).
 
 ```bash
 H=https://pii-guardrail.chronokey.workers.dev
@@ -117,6 +120,37 @@ runnable hand-rolled client is in the code repo:
 [`examples/mpp-client.mjs`](https://github.com/Dyln01/pii-guard/blob/main/examples/mpp-client.mjs)
 (`--inspect` mode explains a live challenge with no wallet needed).
 
+### Rail 3 — prepaid credits (no per-call signing)
+
+Heavy caller? Settle **$5 once** and pay with a header from then on:
+
+```bash
+# 1. buy the pack (settles on-chain exactly like any call; the token is shown ONCE)
+curl -si -X POST $H/v1/credits/buy -H 'content-type: application/json' -d '{}'
+#    -> 402 with both challenges; sign + retry -> 200:
+#       {"credits":{"token":"s402c.v1.<account>.<exp>.<sig>",
+#        "account":{"units":5000,"balance":5000,"expiresAt":"..."}, ...}}
+
+# 2. call ANY paid route with the token instead of a payment header
+curl -s "$H/v1/data/crypto?symbol=BTC" -H "X-Credit-Token: $TOKEN"   # 3 units
+curl -s -X POST $H/v1/scan -H "X-Credit-Token: $TOKEN" \
+  -H 'content-type: application/json' -d '{"text":"...","mode":"redact"}'   # 20 units
+
+# 3. read your balance for free, any time
+curl -s $H/v1/credits/balance -H "X-Credit-Token: $TOKEN"
+#    -> {"account":{"balance":4977,"spentUnits":23,"expiresAt":"...","expired":false},...}
+```
+
+The rules, in one breath: **1 unit = $0.001**; a route costs `ceil(price /
+1 unit)` (the live table is at `GET /v1/credits`); balances are deducted
+**atomically** (a Durable Object per pack — concurrent calls cannot
+double-spend); packs **expire 90 days** after purchase and unused units lapse;
+credits are prepaid and non-refundable; and every route **still accepts
+per-call x402/MPP payment** — a bad, expired or out-of-units token gets a 402
+that says exactly which, *and* carries the usual challenges so your existing
+retry loop recovers in one step. `GET /v1/credits/balance` and
+`GET /v1/credits` are free.
+
 ### MCP and RCP
 
 * **MCP** (`POST /mcp`, streamable HTTP): unpaid `tools/call` → HTTP 402 with
@@ -137,6 +171,9 @@ runnable hand-rolled client is in the code repo:
 * MPP nonces are **not random**: `keccak256(challenge.id + challenge.realm)`, or the credential is rejected.
 * MPP POST challenges bind a body digest — retry with the exact bytes that received the 402.
 * 402s are `Cache-Control: no-store`; never cache a price.
+* `X-Credit-Token` is a **bearer secret** shown exactly once at purchase —
+  store it like an API key; losing it loses the balance. Unit costs round UP
+  to whole units (a $0.0025 route would cost 3 units).
 
 ---
 
@@ -312,7 +349,8 @@ compliance. Regex + checksums cannot find **names, free-text addresses, or undat
 birthdays** — that needs a NER model. The correct framing: *catches the
 credentials and identifiers that cause reportable breaches, in ~1 ms, for a
 fraction of a cent*. Every finding carries a `confidence` so you can set your
-own threshold. MPP support covers the `evm`/`charge` method with EIP-3009
+own threshold. Credit packs do not merge: each purchase returns its own token (spend an old
+one down, or use it to buy the next pack). MPP support covers the `evm`/`charge` method with EIP-3009
 `authorization` credentials (the USDC path); `permit2`/`transaction`/`hash`
 credential types and non-EVM methods (`tempo`, `stripe`, `solana`, …) are
 answered with an actionable `invalid-payload` problem — those rails need a
